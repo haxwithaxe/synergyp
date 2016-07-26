@@ -9,18 +9,16 @@
 set -e
 
 synergys=/usr/bin/synergys
-config_dir=$HOME/.config/synergy
-default_profile=default
-this_script=$(basename $0)
-synergy=synergys
-client=
+CONFIG_DIR=$HOME/.config/synergy
+DEFAULT_PROFILE=default
+SCRIPT_NAME=$(basename $0)
 
-ALIASES=$config_dir/aliases
+ALIASES=$CONFIG_DIR/aliases
 DEBUG=/dev/null
 LAST_CLIENT_FILE=/tmp/${this_script}.last
 
-if ! [ -d $config_dir ] ;then
-	mkdir -p $config_dir
+if ! [ -d $CONFIG_DIR ] ;then
+	mkdir -p $CONFIG_DIR
 fi
 
 usage(){
@@ -29,24 +27,40 @@ $(basename $0) [-p|--profile <profile>] [--set-default <profile>] [-c|--config <
 EOM
 }
 
+# Create a new profile
+# $profile: Profile name
+# $config: Configuration filename
 set_profile(){
+	local profile="$1"
+	local config="$2"
 	echo Creating profile: $profile
-	mv $config $config_dir/${profile}.conf
+	mv "$config" "$CONFIG_DIR/${profile}.conf"
 }
 
 set_default(){
+	local profile="$1"
 	echo Set default profile to: $profile
-	ln -sf $config_dir/${profile}.conf $default_profile
+	ln -sf $CONFIG_DIR/${profile}.conf $DEFAULT_PROFILE
 }
 
+# Naively add profile alias.
+#
+# Arguments:
+#     1: Profile name.
+#     2: Alias rule.
+#
+# Note: This might be confused by a profile with the same name (in favor of the profile).
+#
 add_alias(){
-	# naively adding profile alias. this might be confused by a profile with the same name (in favor of the profile).
+	local profile=$1
+	shift
+	local profile_alias="$@"
 	echo "${profile}=${profile_alias}" >> $ALIASES
 }
 
 match_profile(){
 	local possible_profile=$1
-	for p in $(ls $config_dir/*.conf); do
+	for p in $(ls $CONFIG_DIR/*.conf); do
 		match=$(awk "/${possible_profile}/ {print \$0}" <<< $(basename $p .conf))
 		if [ "$match" != "" ]; then
 			echo $match
@@ -54,13 +68,14 @@ match_profile(){
 	done
 }
 
+
 match_alias(){
 	local possible_alias=$1
 	local linestart=${2:-""}
-	if [ ! -f "$config_dir/aliases" ]; then
+	if [ ! -f "$CONFIG_DIR/aliases" ]; then
 		return 0
 	fi
-	for re in $(cat "$config_dir/aliases"); do
+	for re in $(cat "$CONFIG_DIR/aliases"); do
 		match=$(awk "/$linestart$(cut -d'=' -f 2- <<< $re)/ {print \$0}" <<< $possible_alias)
 		if [[ "$match" != "" ]]; then
 			echo $match
@@ -68,12 +83,21 @@ match_alias(){
 	done
 }
 
+
+# Print the hostnames that match aliases and the hostname fragment.
+#
+# Arguments:
+#     1: A hostname fragment.
+# Side Effects:
+#     stdout: A newline separated list of hostnames that match aliases that match the hostname fragment.
+#
 match_hostname() {
 	hostnames=$(compgen -W "$(list_hostnames)" -- "$1")
 	for h in ${hostnames}; do
 		match_alias $h '^'
 	done
 }
+
 
 profile_completion(){
 	local profile_fragment=$1
@@ -84,55 +108,93 @@ profile_completion(){
 	) | sort -u
 }
 
+
+# Kill all synergys instances on the local machine.
 kill_synergy(){
-	(killall $synergy || killall -9 $synergy || echo $synergy was not running) 2>/dev/null
+	(killall synergys || killall -9 synergys || echo synergys was not running) 2>/dev/null
 }
 
+
 # Kills all instances of synergyc on the target client.
+# 
+# Arguments:
+#     1 (optional): host, Hostname of the target machine.
+#
+# Side Effects:
+#     file: Writes the hostname to $LAST_CLIENT_FILE for future reference.
+#
 kill_client(){
-	host=${client:-"$(cat $LAST_CLIENT_FILE)"}
+	local host=${1:-"$(cat $LAST_CLIENT_FILE)"}
 	ssh $host -- "killall synergyc || killall -9 synergyc || echo synergyc was not running on $host" 2>/dev/null || echo "Could not connect to $host"
 	echo -n > $LAST_CLIENT_FILE
 }
 
+
+# Use the given profile
 use_profile(){
+	local profile=$1
 	kill_synergy > $DEBUG
-	$synergy -c $config_dir/${profile}.conf > $DEBUG && echo "synergys is running with profile \"$profile\""
+	$SYNERGYS -c $CONFIG_DIR/${profile}.conf > $DEBUG && echo "synergys is running with profile \"$profile\""
 	start_client
 }
 
 use_default(){
-	profile=$default_profile
-	use_profile
+	use_profile $DEFAULT_PROFILE
 }
 
+# List all nonderived profiles
+#
+# Side Effects:
+#     stdout: A newline separated list of profile names.
+#
 list_profiles(){
-	for p in $(ls $config_dir/*.conf); do
-		echo $(basename $p .conf)
+	for profile in $(ls $CONFIG_DIR/*.conf); do
+		echo $(basename $profile .conf)
 	done
 }
-
+# List all alias rules.
+#
+# Side Effects:
+#     stdout: A newline separated list of alias rules.
+#
 list_aliases(){
-	cat $config_dir/aliases
+	cat $CONFIG_DIR/aliases
 }
 
+# List all known hostnames and ssh config hosts.
+#
+# Side Effects:
+#     stdout: A newline separated list of hostnames.
+#
 list_hostnames(){
 	(
 		compgen -A hostname ""
-		grep "^Host " ~/.ssh/config | cut -d" " -f2-
+		grep "^Host " $HOME/.ssh/config | cut -d" " -f2-
 	) 2>&1 \
 	| sort -u | grep -v '^ip6-all'
 }
 
+# Validate profile names.
+#
+# Profile names must be:
+#   * A real profile name.
+#   * A match for an alias rule.
+#   * A hostname in ssh configs
+#   * A hostname in /etc/hosts
+#
+# Arguments:
+#     1: Profile name
 validate_profile(){
-	if [ ! -f "$config_dir/${profile}.conf" ]; then
-		if [ -f "$config_dir/aliases" ]; then
-			for re in $(cat "$config_dir/aliases"); do
+	local profile="$1"
+	if [ ! -f "$CONFIG_DIR/${profile}.conf" ]; then
+		if [ -f "$CONFIG_DIR/aliases" ]; then
+			for re in $(cat "$CONFIG_DIR/aliases"); do
 				match=$(awk "$(cut -d'=' -f2- <<< $re) {print \$0}" <<< $profile)
 				if [[ "$match" != "" ]]; then
 					client=$profile
 					profile=$(cut -d'=' -f1 <<< $re)
-					validate_profile
+					client=${client:-$(validate_profile $profile)}
+					echo $client
 					return 0
 				fi
 			done
@@ -144,14 +206,16 @@ validate_profile(){
 }
 
 validate_default(){
-	if [ "$default" != "default" ] && [ ! -f $config_dir/${default}.conf ] ;then
-		echo -e "ERROR: The default profile is not set.\nuse: $(basename $0) --default <existing profile name> or $(basename $0) --default --config <config file>" >&2
+	local default="$1"
+	if [ "$default" != "default" ] && [ ! -f $CONFIG_DIR/${default}.conf ] ;then
+		echo -e "ERROR: The default profile is not set.\nuse: $SCRIPT_NAME --default <existing profile name> or $SCRIPT_NAME --default --config <config file>" >&2
 		usage
 		exit 1
 	fi
 }
 
 validate_config(){
+	local config="$1"
 	if ! [ -f $config ]; then
 		echo "ERROR: \"${config}\" is not a file." >&2
 		usage
@@ -160,17 +224,21 @@ validate_config(){
 }
 
 stop_all(){
+	local client=$1
+	local profile=$2
 	kill_synergy
-	kill_client
+	kill_client $client
 }
 
 start_client(){
+	local client=$1
+	local profile=$2
 	server_ip=$(ip addr show | awk '/inet .* global/ { split($2, a,"/"); print a[1] }')
 	if [ -z "$client" ]; then
 		client=$profile
 	fi
 	if [ -n $server_ip ]; then
-		kill_client > $DEBUG
+		kill_client $client > $DEBUG
 		stderr=$(ssh $client -- "synergyc --display :0.0 $server_ip" 3>&1 2>&3 1>/dev/null)
 		if [[ $? -ne 0 ]]; then
 			echo $stderr
@@ -242,15 +310,15 @@ while true; do
 			shift
 			profile="$1"
 			shift
-			validate_profile
+			validate_profile $profile
 			;;
 		-c|--config)
 			shift
 			config="$1"
 			shift
-			validate_config
+			validate_config $config
 			;;
-		--host)
+		--host) 
 			shift
 			client="$1"
 			shift
@@ -274,25 +342,23 @@ done
 
 if [ -n "$default" ] &&  [ "$default" != "default" ]; then
 		validate_default
-		profile=$default
-		set_default
+		set_default $default
 elif [ -n "$profile" ]; then
 	if [ -n "$config" ]; then
-		set_profile
+		set_profile $config
 	elif [ $stop_all ]; then
 		kill_synergy
 		kill_client
 	elif [ -n "$profile_alias" ]; then
-		add_alias
+		add_alias "$profile" "$profile_alias"
 	else
-		use_profile
+		use_profile "$profile"
 	fi
 elif [ -n "$config" ]; then
-	profile=tmp
-	set_profile
-	use_profile
+	set_profile tmp
+	use_profile tmp
 	sleep 5
-	rm $config_dir/tmp.conf
+	rm $CONFIG_DIR/tmp.conf
 else
 	use_default
 fi
