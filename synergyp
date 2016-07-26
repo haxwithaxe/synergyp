@@ -6,9 +6,9 @@
 #
 # Link this to synergyps for server or synergypc for client
 
-set -e
+set -ex
 
-synergys=/usr/bin/synergys
+SYNERGYS=/usr/bin/synergys
 CONFIG_DIR=$HOME/.config/synergy
 DEFAULT_PROFILE=default
 SCRIPT_NAME=$(basename $0)
@@ -101,7 +101,7 @@ match_hostname() {
 
 profile_completion(){
 	local profile_fragment=$1
-	(
+	(1
 		match_profile $profile_fragment
 		match_hostname $profile_fraagment
 		match_alias $profile_fragment
@@ -135,11 +135,11 @@ use_profile(){
 	local profile=$1
 	kill_synergy > $DEBUG
 	$SYNERGYS -c $CONFIG_DIR/${profile}.conf > $DEBUG && echo "synergys is running with profile \"$profile\""
-	start_client
+	start_client "$profile"
 }
 
 use_default(){
-	use_profile $DEFAULT_PROFILE
+	use_profile $DEFAULT_PROFILE 
 }
 
 # List all nonderived profiles
@@ -231,13 +231,10 @@ stop_all(){
 }
 
 start_client(){
-	local client=$1
-	local profile=$2
-	server_ip=$(ip addr show | awk '/inet .* global/ { split($2, a,"/"); print a[1] }')
-	if [ -z "$client" ]; then
-		client=$profile
-	fi
-	if [ -n $server_ip ]; then
+	local profile=$1
+	local client=${2:-$profile}
+	server_ip=$(ip addr show | awk '/inet .* global/ { split($2, a,"/"); print a[1] }' | head -n1)
+	if [ -n "$server_ip" ]; then
 		kill_client $client > $DEBUG
 		stderr=$(ssh $client -- "synergyc --display :0.0 $server_ip" 3>&1 2>&3 1>/dev/null)
 		if [[ $? -ne 0 ]]; then
