@@ -6,7 +6,7 @@
 #
 # Link this to synergyps for server or synergypc for client
 
-set -ex
+set -e
 
 SYNERGYS=/usr/bin/synergys
 CONFIG_DIR=$HOME/.config/synergy
@@ -101,7 +101,7 @@ match_hostname() {
 
 profile_completion(){
 	local profile_fragment=$1
-	(1
+	(
 		match_profile $profile_fragment
 		match_hostname $profile_fraagment
 		match_alias $profile_fragment
