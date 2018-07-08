@@ -15,6 +15,8 @@ SCRIPT_NAME=$(basename $0)
 
 ALIASES=$CONFIG_DIR/aliases
 DEBUG=/dev/null
+LOG_FILE=/dev/stdout
+CLIENT_LOG=/tmp/synergyc.log
 LAST_CLIENT_FILE=/tmp/${this_script}.last
 
 if ! [ -d $CONFIG_DIR ] ;then
@@ -233,23 +235,28 @@ stop_all(){
 start_client(){
 	local profile=$1
 	local client=${2:-$profile}
-	server_ip=$(ip addr show | awk '/inet .* global/ { split($2, a,"/"); print a[1] }' | head -n1)
+	server_ip=$(ip addr show | awk '/inet .* global/ { split($2, a,"/"); print a[1] }' | tail -n1)
 	if [ -n "$server_ip" ]; then
 		kill_client $client > $DEBUG
-		stderr=$(ssh $client -- "synergyc --display :0.0 $server_ip" 3>&1 2>&3 1>/dev/null)
-		if [[ $? -ne 0 ]]; then
-			echo $stderr
-		else
-			echo -n $client > $LAST_CLIENT_FILE
-			echo "synergyc is running on $client"
-		fi
+		#if [[ $DEBUG != /dev/null ]]; then
+		#	echo Debugging client.
+		#	(ssh $client -- "synergyc -f -d DEBUG --display :0 $server_ip") &
+		#else
+			stderr=$(ssh $client -- "synergyc -d DEBUG -l /tmp/synergyc.log --display :0 $server_ip" 3>&1 2>&3 1>/dev/null)
+			if [[ $? -ne 0 ]]; then
+				echo $stderr
+			else
+				echo -n $client > $LAST_CLIENT_FILE
+				echo "synergyc is running on $client"
+			fi
+		#fi
 	else
 		echo "Couldn\'t determine the IP address of this machine." >&2
 		exit 1
 	fi
 }
 
-eval set -- $(getopt -o "hlak:p:c:" --long "help,list-profiles,list-aliases,list-hostnames,match-alias:,match-hostname:,profile-completion:,completion,kill-all,kill:,profile:,config:,host:,set-default:" -n "$this_script" -- "$@")
+eval set -- $(getopt -o "hlak:p:c:" --long "help,list-profiles,list-aliases,list-hostnames,match-alias:,match-hostname:,profile-completion:,completion,debug,kill-all,kill:,profile:,config:,host:,set-default:" -n "$this_script" -- "$@")
 
 
 while true; do
@@ -294,6 +301,10 @@ while true; do
 			shift
 			echo "-h -l -a -k -p -c --help --list-profiles --list-aliases --match-alias --profile-completion --kill-all --kill --profile --config --host --set-default"
 			exit 0
+			;;
+		--debug)
+			shift
+			DEBUG=$LOG_FILE
 			;;
 		--kill-all)
 			stop_all
