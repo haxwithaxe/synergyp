@@ -1,21 +1,21 @@
 
 _synergyp() {
 	local cur prev words cword split
-    _init_completion -s || return
+	_init_completion -s || return
 
-    case $prev in
-        -p|--profile|-k|--kill|--set-default)
+	case $prev in
+		-p|--profile|-k|--kill|--set-default)
 			COMPREPLY=( $(compgen -W "$(synergyp --profile-completion "$cur")" -- "$cur" ) )
-            return 0
-            ;;
-        -l|--list-profiles|-a|--list-aliases|--kill-all|-h|--help|--add-alias)
-            return 0
-            ;;
+			return 0
+			;;
+		-l|--list-profiles|-a|--list-aliases|--kill-all|-h|--help|--add-alias)
+			return 0
+			;;
 		--host)
 			COMPREPLY=( $(compgen -W "$(synergyp --list-hostnames)" -- "$cur") )
 			return 0
 			;;
-    esac
+	esac
 
 
 	case "$cur" in
